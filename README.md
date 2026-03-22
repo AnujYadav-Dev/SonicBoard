@@ -3,7 +3,7 @@
 # ✦ SonicBoard
 
 ### **Download any Spotify playlist as MP3 320k - straight to your PC**
-*Full metadata · Synced lyrics · Album art · Genre tags · Zero faff*
+*Full metadata · Synced lyrics · Album art · Genre tags · Smart audio matching*
 
 <br/>
 
@@ -27,6 +27,8 @@
 | 🏷️ **Metadata** | Title, Artist, Album Artist, Album, Year, Track №, Disc №, ISRC, Spotify URL, Cover Art, Genre |
 | 📝 **Lyrics** | Synced `.lrc` preferred; 4-source cascade: LRCLib → lyrics.ovh → Genius → syncedlyrics |
 | 🎭 **No Lyrics Fallback** | Animated placeholder `.lrc` embedded into MP3 - works in any folder |
+| 🎯 **Smart Audio Matching** | Scores up to 8 candidates before downloading; rejects karaoke, instrumentals, covers, tributes automatically |
+| 🔇 **Audio Track Guard** | `bestaudio[acodec!=none]` format filter prevents silent/background-only alternate streams |
 | 🧹 **Clean Audio** | SponsorBlock removes intros, outros, self-promos; duration filter rejects extended mixes |
 | 🎼 **Genre Tags** | Spotify artist data with automatic Last.fm fallback (Spotify genres empty since 2025) |
 | 📁 **Output** | `Playlist Name/MP3/` and `Playlist Name/LRC/` inside a single ZIP |
@@ -109,30 +111,41 @@ Each `.mp3` file is embedded with:
 Spotify API ──► Playlist metadata + track info (title, artist, ISRC, cover, genre…)
                     │
                     ▼
-           YouTube Search (yt-dlp)
-           ┌──────────────────────────────────────────────┐
-           │  1. Prefer "provided to YouTube" / VEVO       │
-           │  2. SponsorBlock: cut intros/outros/selfpromo  │
-           │  3. Duration filter: ±30–45s window           │
-           │  4. Fallback: plain ytsearch1                  │
-           └──────────────────────────────────────────────┘
+           YouTube Smart Matching (yt-dlp)
+           ┌───────────────────────────────────────────────────────┐
+           │  Phase 1 - Candidate scoring                          │
+           │    • Fetch up to 8 candidates via extract_flat        │
+           │    • Score each: title words + artist name match      │
+           │    • Hard -100 penalty: karaoke / instrumental /      │
+           │      cover / tribute / backing track / no vocals      │
+           │    • Bonus: official / audio / vevo signals           │
+           │    • Duration gate: ±35–45 s window                   │
+           │    • Download the highest-scoring candidate directly  │
+           │                                                       │
+           │  Phase 2 - Plain-query fallback (if Phase 1 fails)    │
+           │    • Simple ytsearch1 on "Artist Title"               │
+           │    • Wider duration window (±45–60 s)                 │
+           │                                                       │
+           │  Always: bestaudio[acodec!=none] format filter        │
+           │          prevents silent alternate audio streams      │
+           └───────────────────────────────────────────────────────┘
                     │
                     ▼
            Lyrics Cascade
-           ┌──────────────────────────────────────────────┐
+           ┌───────────────────────────────────────────────┐
            │  1. LRCLib      - synced .lrc (best quality)  │
            │  2. lyrics.ovh  - plain text, no key needed   │
-           │  3. Genius      - scraping, Hindi/non-English  │
+           │  3. Genius      - scraping, Hindi/non-English │
            │  4. syncedlyrics - Musixmatch, Apple, NetEase │
            │  ✗  None found  - funny animated placeholder  │
-           └──────────────────────────────────────────────┘
+           └───────────────────────────────────────────────┘
                     │
                     ▼
            Genre Resolution
-           ┌──────────────────────────────────────────────┐
+           ┌───────────────────────────────────────────────┐
            │  1. Spotify artist.genres                     │
            │  2. Last.fm artist.getTopTags (fallback)      │
-           └──────────────────────────────────────────────┘
+           └───────────────────────────────────────────────┘
                     │
                     ▼
            mutagen ID3v2.3 embed (lyrics always go into USLT tag)
@@ -140,6 +153,37 @@ Spotify API ──► Playlist metadata + track info (title, artist, ISRC, cover
                     ▼
            ZIP  ──►  files.download()  ──►  Your PC
 ```
+
+<br/>
+
+---
+
+## 🎯 Smart Audio Matching
+
+The previous approach searched YouTube and blindly downloaded the first result that passed a duration check. This caused two recurring problems: karaoke/instrumental versions being downloaded instead of originals, and YouTube's multi-track audio system sometimes exposing a background-music-only stream as the "best" audio format.
+
+SonicBoard now uses a two-phase matching system:
+
+**Phase 1 - Scored candidate selection**
+
+Instead of downloading the first result, the script fetches up to 8 candidates using `extract_flat` (fast - no audio downloaded yet) and scores every result before committing to any download.
+
+| Signal | Score |
+|---|---|
+| Title words matching the track | +3 per word |
+| Artist name words matching | +2 per word |
+| "official", "audio", "vevo", "music video" in title | +2 each |
+| `karaoke`, `instrumental`, `cover`, `tribute`, `backing track`, `no vocals`, `minus one`, `remake`, `rendition` | **−100 (hard penalty)** |
+
+Only the highest-scoring candidate that also passes the duration gate (`±35 s`) gets downloaded - directly by URL, not via another search. If the winning score is deeply negative (all candidates are non-originals), the phase fails cleanly rather than downloading something wrong.
+
+**Phase 2 - Plain fallback**
+
+If Phase 1 finds nothing, a simple `Artist Title` query is used as a last resort with a slightly wider duration window.
+
+**Audio track guard**
+
+The format selector was changed from `bestaudio/best` to `bestaudio[acodec!=none]/bestaudio/best`. This prevents yt-dlp from picking a YouTube multi-track alternate stream (often a background-music-only dub track) that can surface as the top-ranked audio format.
 
 <br/>
 
@@ -180,15 +224,15 @@ Results are cached per artist to avoid redundant API calls across the same playl
 | Library | Role |
 |---|---|
 | [`spotipy`](https://spotipy.readthedocs.io/) | Spotify Web API client - playlist & artist data |
-| [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) | YouTube audio extraction |
+| [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) | YouTube audio extraction & candidate scoring |
 | [`ffmpeg`](https://ffmpeg.org/) | Audio transcoding to MP3 320k |
 | [`mutagen`](https://mutagen.readthedocs.io/) | ID3v2.3 metadata embedding |
 | [`requests`](https://requests.readthedocs.io/) | HTTP - cover art, lyrics APIs |
 | [`beautifulsoup4`](https://www.crummy.com/software/BeautifulSoup/) | HTML parsing for Genius lyrics scraping |
 | [`syncedlyrics`](https://github.com/moisesmorillo/syncedlyrics) | Lyrics package - Musixmatch, Apple Music, NetEase |
-| [LRCLib](https://lrclib.net/) | Primary lyrics source (synced + plain) |
-| [lyrics.ovh](https://lyrics.ovh/) | Secondary lyrics source (plain, no key) |
-| [Last.fm API](https://www.last.fm/api) | Genre fallback (`artist.getTopTags`) |
+| [`LRCLib`](https://lrclib.net/) | Primary lyrics source (synced + plain) |
+| [`lyrics.ovh`](https://lyrics.ovh/) | Secondary lyrics source (plain, no key) |
+| [`Last.fm API`](https://www.last.fm/api) | Genre fallback (`artist.getTopTags`) |
 
 <br/>
 
@@ -222,6 +266,9 @@ The script will skip it, log it as `failed`, and continue. A summary is printed 
 
 **Q: Can I use this for albums or single tracks?**
 Currently playlists only. Album and track support is a planned enhancement - PRs welcome.
+
+**Q: Why did I get an instrumental or karaoke version before?**
+The old script downloaded the first YouTube result that matched the duration, with no check of what the video actually was. The new smart matching system scores up to 8 candidates and applies a hard penalty to any result whose title contains karaoke, instrumental, cover, tribute, or similar keywords. See the [Smart Audio Matching](#-smart-audio-matching) section for full details.
 
 **Q: What if lyrics aren't found?**
 All four sources are tried in order (LRCLib → lyrics.ovh → Genius → syncedlyrics). If all fail, a fun animated placeholder `.lrc` is created and embedded into the MP3 so it always displays correctly in your music player.
