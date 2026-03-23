@@ -2,7 +2,7 @@
 
 # ✦ SonicBoard
 
-### **Download any Spotify playlist as MP3 320k - straight to your PC**
+### **Download any Spotify playlist or track as MP3 320k - straight to your PC**
 *Full metadata · Synced lyrics · Album art · Genre tags · Smart audio matching*
 
 <br/>
@@ -19,7 +19,7 @@
 
 ## ✦ What is SonicBoard?
 
-**SonicBoard** is a Google Colab notebook that turns any Spotify playlist into a clean, fully-tagged MP3 collection - downloaded as a ZIP directly to your computer. No CLI setup. No local Python environment. No subscriptions. Just paste, run, and receive.
+**SonicBoard** is a Google Colab notebook that turns any Spotify playlist or individual track into a clean, fully-tagged MP3 collection - downloaded as a ZIP directly to your computer. No CLI setup. No local Python environment. No subscriptions. Just paste, run, and receive.
 
 | Feature | Details |
 |---|---|
@@ -31,6 +31,7 @@
 | 🔇 **Audio Track Guard** | `bestaudio[acodec!=none]` format filter prevents silent/background-only alternate streams |
 | 🧹 **Clean Audio** | SponsorBlock removes intros, outros, self-promos; duration filter rejects extended mixes |
 | 🎼 **Genre Tags** | Spotify artist data with automatic Last.fm fallback (Spotify genres empty since 2025) |
+| 🔗 **URL Support** | Paste a playlist URL **or** a single track URL — both work |
 | 📁 **Output** | `Playlist Name/MP3/` and `Playlist Name/LRC/` inside a single ZIP |
 | ☁️ **Platform** | Google Colab - runs entirely in the cloud, no local install |
 
@@ -70,8 +71,8 @@ Spotify has silently emptied most artist genre data since early 2025. SonicBoard
 |---|---|
 | **Cell 1** | Installs all dependencies (`spotipy`, `yt-dlp`, `mutagen`, `ffmpeg`, `syncedlyrics`, etc.) |
 | **Cell 2** | Paste your **Spotify Client ID**, **Client Secret**, and optional **Last.fm API Key** |
-| **Cell 3** | Paste your **Spotify playlist URL** |
-| **Cell 4** | Runs the full downloader - sit back |
+| **Cell 3** | Paste a **Spotify playlist URL** or a **single track URL** |
+| **Cell 4** | Runs the full downloader — sit back |
 
 `Runtime → Run all` and you're done. A ZIP file will download to your PC automatically when finished.
 
@@ -81,6 +82,7 @@ Spotify has silently emptied most artist genre data since early 2025. SonicBoard
 
 ## 📂 Output Structure
 
+**Playlist:**
 ```
 Playlist Name/
 ├── MP3/
@@ -91,6 +93,15 @@ Playlist Name/
     ├── Blinding Lights - The Weeknd.lrc
     ├── Levitating - Dua Lipa.lrc
     └── ...
+```
+
+**Single track:**
+```
+Song Title - Artist Name/
+├── MP3/
+│   └── Song Title - Artist Name.mp3
+└── LRC/
+    └── Song Title - Artist Name.lrc
 ```
 
 Each `.mp3` file is embedded with:
@@ -108,51 +119,71 @@ Each `.mp3` file is embedded with:
 ## 🔧 How It Works
 
 ```
-Spotify API ──► Playlist metadata + track info (title, artist, ISRC, cover, genre…)
-                    │
-                    ▼
-           YouTube Smart Matching (yt-dlp)
-           ┌───────────────────────────────────────────────────────┐
-           │  Phase 1 - Candidate scoring                          │
-           │    • Fetch up to 8 candidates via extract_flat        │
-           │    • Score each: title words + artist name match      │
-           │    • Hard -100 penalty: karaoke / instrumental /      │
-           │      cover / tribute / backing track / no vocals      │
-           │    • Bonus: official / audio / vevo signals           │
-           │    • Duration gate: ±35–45 s window                   │
-           │    • Download the highest-scoring candidate directly  │
-           │                                                       │
-           │  Phase 2 - Plain-query fallback (if Phase 1 fails)    │
-           │    • Simple ytsearch1 on "Artist Title"               │
-           │    • Wider duration window (±45–60 s)                 │
-           │                                                       │
-           │  Always: bestaudio[acodec!=none] format filter        │
-           │          prevents silent alternate audio streams      │
-           └───────────────────────────────────────────────────────┘
-                    │
-                    ▼
-           Lyrics Cascade
-           ┌───────────────────────────────────────────────┐
-           │  1. LRCLib      - synced .lrc (best quality)  │
-           │  2. lyrics.ovh  - plain text, no key needed   │
-           │  3. Genius      - scraping, Hindi/non-English │
-           │  4. syncedlyrics - Musixmatch, Apple, NetEase │
-           │  ✗  None found  - funny animated placeholder  │
-           └───────────────────────────────────────────────┘
-                    │
-                    ▼
-           Genre Resolution
-           ┌───────────────────────────────────────────────┐
-           │  1. Spotify artist.genres                     │
-           │  2. Last.fm artist.getTopTags (fallback)      │
-           └───────────────────────────────────────────────┘
-                    │
-                    ▼
-           mutagen ID3v2.3 embed (lyrics always go into USLT tag)
-                    │
-                    ▼
-           ZIP  ──►  files.download()  ──►  Your PC
+Spotify URL (playlist or track)
+         │
+         ▼
+Spotify API ──► Track metadata (title, artist, ISRC, cover, genre…)
+         │       • playlist/ → paginates all tracks via playlist_items()
+         │       • track/    → fetches single track via sp.track()
+         │       Both paths produce identical track dicts
+         ▼
+YouTube Smart Matching (yt-dlp)
+┌───────────────────────────────────────────────────────┐
+│  Phase 1 — Candidate scoring                          │
+│    • Fetch up to 8 candidates via extract_flat        │
+│    • Score each: title words + artist name match      │
+│    • Hard -100 penalty: karaoke / instrumental /      │
+│      cover / tribute / backing track / no vocals      │
+│    • Bonus: official / audio / vevo signals           │
+│    • Duration gate: ±35–45 s window                   │
+│    • Download the highest-scoring candidate directly  │
+│                                                       │
+│  Phase 2 — Plain-query fallback (if Phase 1 fails)    │
+│    • Simple ytsearch1 on "Artist Title"               │
+│    • Wider duration window (±45–60 s)                 │
+│                                                       │
+│  Always: bestaudio[acodec!=none] format filter        │
+│          prevents silent alternate audio streams      │
+└───────────────────────────────────────────────────────┘
+         │
+         ▼
+Lyrics Cascade
+┌──────────────────────────────────────────────┐
+│  1. LRCLib      - synced .lrc (best quality) │
+│  2. lyrics.ovh  - plain text, no key needed  │
+│  3. Genius      - scraping, Hindi/non-English│
+│  4. syncedlyrics - Musixmatch, Apple, NetEase│
+│  ✗  None found  - funny animated placeholder │
+└──────────────────────────────────────────────┘
+         │
+         ▼
+Genre Resolution
+┌──────────────────────────────────────────────┐
+│  1. Spotify artist.genres                    │
+│  2. Last.fm artist.getTopTags (fallback)     │
+└──────────────────────────────────────────────┘
+         │
+         ▼
+mutagen ID3v2.3 embed (lyrics always go into USLT tag)
+         │
+         ▼
+ZIP  ──►  files.download()  ──►  Your PC
 ```
+
+<br/>
+
+---
+
+## 🔗 URL Support
+
+Cell 3 accepts either URL type — no configuration needed, SonicBoard detects automatically:
+
+| Type | Example URL | ZIP name |
+|---|---|---|
+| **Playlist** | `https://open.spotify.com/playlist/5f080ra...` | `Playlist Name.zip` |
+| **Track** | `https://open.spotify.com/track/4cOdK2wGLETKBW...` | `Song Title - Artist.zip` |
+
+Any other URL format (album, artist, podcast) will raise a clear error in Cell 3 before any API call is made.
 
 <br/>
 
@@ -164,7 +195,7 @@ The previous approach searched YouTube and blindly downloaded the first result t
 
 SonicBoard now uses a two-phase matching system:
 
-**Phase 1 - Scored candidate selection**
+**Phase 1 — Scored candidate selection**
 
 Instead of downloading the first result, the script fetches up to 8 candidates using `extract_flat` (fast - no audio downloaded yet) and scores every result before committing to any download.
 
@@ -177,7 +208,7 @@ Instead of downloading the first result, the script fetches up to 8 candidates u
 
 Only the highest-scoring candidate that also passes the duration gate (`±35 s`) gets downloaded - directly by URL, not via another search. If the winning score is deeply negative (all candidates are non-originals), the phase fails cleanly rather than downloading something wrong.
 
-**Phase 2 - Plain fallback**
+**Phase 2 — Plain fallback**
 
 If Phase 1 finds nothing, a simple `Artist Title` query is used as a last resort with a slightly wider duration window.
 
@@ -223,16 +254,16 @@ Results are cached per artist to avoid redundant API calls across the same playl
 
 | Library | Role |
 |---|---|
-| [`spotipy`](https://spotipy.readthedocs.io/) | Spotify Web API client - playlist & artist data |
+| [`spotipy`](https://spotipy.readthedocs.io/) | Spotify Web API client - playlist & track data |
 | [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) | YouTube audio extraction & candidate scoring |
 | [`ffmpeg`](https://ffmpeg.org/) | Audio transcoding to MP3 320k |
 | [`mutagen`](https://mutagen.readthedocs.io/) | ID3v2.3 metadata embedding |
 | [`requests`](https://requests.readthedocs.io/) | HTTP - cover art, lyrics APIs |
 | [`beautifulsoup4`](https://www.crummy.com/software/BeautifulSoup/) | HTML parsing for Genius lyrics scraping |
 | [`syncedlyrics`](https://github.com/moisesmorillo/syncedlyrics) | Lyrics package - Musixmatch, Apple Music, NetEase |
-| [`LRCLib`](https://lrclib.net/) | Primary lyrics source (synced + plain) |
-| [`lyrics.ovh`](https://lyrics.ovh/) | Secondary lyrics source (plain, no key) |
-| [`Last.fm API`](https://www.last.fm/api) | Genre fallback (`artist.getTopTags`) |
+| [LRCLib](https://lrclib.net/) | Primary lyrics source (synced + plain) |
+| [lyrics.ovh](https://lyrics.ovh/) | Secondary lyrics source (plain, no key) |
+| [Last.fm API](https://www.last.fm/api) | Genre fallback (`artist.getTopTags`) |
 
 <br/>
 
@@ -246,6 +277,7 @@ This notebook is updated for the **February 2026 Spotify Web API changes**:
 |---|---|---|
 | Playlist items endpoint | `sp.playlist_tracks()` → `/tracks` | `sp.playlist_items()` → `/items` ✅ |
 | Track key in response | `item['track']` only | `item.get('track') or item.get('item')` ✅ |
+| Single track support | Playlists only | `sp.track()` added for `track/` URLs ✅ |
 | Dev Mode requirement | Any account | **Premium required** on app-owner account |
 | Artist genre data | Usually populated | Mostly empty - Last.fm fallback added ✅ |
 
@@ -264,8 +296,11 @@ The Spotify API credentials (Client ID/Secret) need to belong to a **Premium** a
 **Q: What if a track fails to download?**
 The script will skip it, log it as `failed`, and continue. A summary is printed at the end. You can re-run the notebook - already downloaded files are skipped automatically.
 
-**Q: Can I use this for albums or single tracks?**
-Currently playlists only. Album and track support is a planned enhancement - PRs welcome.
+**Q: Can I paste a single song link instead of a playlist?**
+Yes. Paste any `open.spotify.com/track/...` URL into Cell 3 and SonicBoard will download just that one song with full metadata, lyrics, and album art — same quality and output structure as a playlist, just one item.
+
+**Q: Can I use this for albums?**
+Not yet. Album URL support is a planned enhancement — PRs welcome.
 
 **Q: Why did I get an instrumental or karaoke version before?**
 The old script downloaded the first YouTube result that matched the duration, with no check of what the video actually was. The new smart matching system scores up to 8 candidates and applies a hard penalty to any result whose title contains karaoke, instrumental, cover, tribute, or similar keywords. See the [Smart Audio Matching](#-smart-audio-matching) section for full details.
